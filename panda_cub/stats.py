@@ -43,5 +43,90 @@ def t_test(df, x_rank, y_rank, value):
 
     return _ret
 
+def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None, verbose=False):
+    """
+    Winsorize columns by setting values outside of the p and 1-p percentiles
+    equal to the p and 1-p percentiles respectively.
+    Set inplace=True to make new column called prefix+'column'+suffix.
+    Set inplace=False to return array of winsorized Series conforming to length of `columns`
+    """
+    if type(columns) not in (list, iter, set):
+        columns = (columns,)
+    new_cols = []
+    for column in columns:
+        new_col_name = '{}{}{}'.format(prefix or '', column, suffix or '')
+        p = max(0, min(.5, p))
+        low=df[column].quantile(p)
+        hi=df[column].quantile(1-p)
+        if verbose:
+            print("{}: Num < {:0.2f}: {} ({:0.3f}), num > {:0.2f}: {} ({:0.3f})"
+                  .format(column, low, sum(df[column]<low),
+                          sum(df[column]<low)/len(df[column]), hi,
+                          sum(df[column]>hi ),
+                          sum(df[column]>hi )/len(df[column])))
+        if inplace:
+            df[new_col_name] = df[column].copy()
+            df.ix[df[new_col_name]>hi, new_col_name] = hi
+            df.ix[df[new_col_name]<low, new_col_name] = low
+        else:
+            _tmpcol = df[column].copy()
+            _tmpcol.ix[_tmpcol<low] = low
+            _tmpcol.ix[_tmpcol>hi] = hi
+            new_cols.append(_tmpcol)
+    if inplace:
+        return df
+    return new_cols
+
+def normalize(df, columns, p=0, inplace=False, prefix=None, suffix=None, verbose=False):
+    """
+    Normalize columns to have mean=0 and standard deviation = 1.
+    Mean and StdDev. are calculated excluding the <p and >1-p percentiles.
+    Set inplace=True to make new column called prefix+'column'+suffix.
+    Set inplace=False to return array of winsorized Series conforming to length of `columns`
+    """
+    if type(columns) not in (list, iter, set):
+        columns = list(columns)
+    new_cols = []
+    for column in columns:
+        if p > 0 & p < .5:
+            low=df[column].quantile(p)
+            hi=df[column].quantile(1-p)
+            sel = (df[column]>=low)&(df[column]<=hi)
+        else:
+            sel = df[column].notnull()
+        _mu = df.ix[sel, column].mean()
+        _rho = df.ix[sel,column].std()
+        if not _rho > 0:
+            raise ValueError('0 standard deviation found when normalizing '
+                             '{} (mean={})'.format(column, _mu))
+        new_col_name = '{}{}{}'.format(prefix or '', column, suffix or '')
+        if verbose:
+            print('{} = ({} - {:.2f}) / {:.2f}'
+                  .format(new_col_name, column, _mu, _rho))
+        if inplace:
+            df[new_col_name] = (df[column] - _mu) / _rho
+        else:
+            new_cols.append((df[column] - _mu) / _rho)
+    if inplace:
+        return df
+    return new_cols
+
+def coalesce(df, *cols):
+    if len(cols) < 1:
+        raise ValueError('must specify list of columns, got: {!r}'
+                         .format(cols))
+    if len(cols) == 1:
+        return df[cols[0]]
+
+    _return_column = df[cols[0]]
+    for col in cols:
+        _return_column = _return_column.fillna(df[col])
+    return _return_column
+
 # Now monkey patch pandas.
-pd.DataFrame.t_test = t_test
+print("Run monkey_patch_pandas() to monkey patch pandas.")
+def monkey_patch_pandas():
+    pd.DataFrame.t_test = t_test
+    pd.DataFrame.normalize = normalize
+    pd.DataFrame.winsor = winsor
+    pd.DataFrame.coalesce = coalesce
