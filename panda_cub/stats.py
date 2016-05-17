@@ -85,7 +85,7 @@ def normalize(df, columns, p=0, inplace=False, prefix=None, suffix=None, verbose
     Set inplace=False to return array of winsorized Series conforming to length of `columns`
     """
     if type(columns) not in (list, iter, set):
-        columns = list(columns)
+        columns = (columns,)
     new_cols = []
     for column in columns:
         if p > 0 & p < .5:
