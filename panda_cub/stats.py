@@ -58,6 +58,11 @@ def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None, verbose
         p = max(0, min(.5, p))
         low=df[column].quantile(p)
         hi=df[column].quantile(1-p)
+        if pd.np.isnan(low) or pd.np.isnan(hi):
+            if verbose:
+                print("One of the quantiles is NAN! low: {}, high: {}"
+                      .format(low,hi))
+            continue
         if verbose:
             print("{}: Num < {:0.2f}: {} ({:0.3f}), num > {:0.2f}: {} ({:0.3f})"
                   .format(column, low, sum(df[column]<low),
@@ -111,17 +116,30 @@ def normalize(df, columns, p=0, inplace=False, prefix=None, suffix=None, verbose
         return df
     return new_cols
 
-def coalesce(df, *cols):
+def coalesce(df, *cols, no_scalar=False):
+    """Fills in missing values with subsequently defined columns.
+    Element-wise equivalent of: (col[0] or col[1] or ... or col[-1])
+    The last provided value in *cols is assumed to be a scalar,
+    and .fillna(col[-1]) is called unless `no_scalar` is set to True.
+    """
     if len(cols) < 1:
         raise ValueError('must specify list of columns, got: {!r}'
                          .format(cols))
     if len(cols) == 1:
-        return df[cols[0]]
+        return df[cols[0]].copy()
 
-    _return_column = df[cols[0]]
-    for col in cols:
-        _return_column = _return_column.fillna(df[col])
+    _cols = list(cols) if no_scalar else list(cols[:-1])
+    _return_column = df[_cols.pop(0)].copy()
+    for col in _cols:
+        if col in df:
+            _return_column = _return_column.fillna(df[col])
+    if not no_scalar:
+        _return_column = _return_column.fillna(cols[-1])
     return _return_column
+
+def get_duplicated(df, columns):
+    dups = df.ix[df.duplicated(columns), columns].sort_values(columns)
+    return df.merge(dups, on=columns, how='right')
 
 # Now monkey patch pandas.
 print("Run monkey_patch_pandas() to monkey patch pandas.")
@@ -130,3 +148,5 @@ def monkey_patch_pandas():
     pd.DataFrame.normalize = normalize
     pd.DataFrame.winsor = winsor
     pd.DataFrame.coalesce = coalesce
+    pd.DataFrame.get_duplicated = get_duplicated
+    print("Added t_test, normalize, winsor, coalesce, and get_duplicated.")
