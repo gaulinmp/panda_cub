@@ -5,7 +5,9 @@ import pandas as pd
 import scipy.stats as stats
 
 def _listify(obj):
-    if obj is not None and not isinstance(obj, (tuple, list, set)):
+    if obj is None:
+        return None
+    if not isinstance(obj, (tuple, list, set)):
         return [obj]
     return list(obj)
 
@@ -139,7 +141,12 @@ def coalesce(df, *cols, no_scalar=False):
     return _return_column
 
 def get_duplicated(df, columns):
-    _cols = _listify(columns)
+    """
+    Return dataframe of all rows which match duplicated criteria.
+    Differs from df[df.duplicated(cols)] in that the latter returns only the second
+    occurance of the duplicated rows, this returns both.
+    """
+    _cols = _listify(columns) if columns else df.columns
     dups = df.ix[df.duplicated(_cols), _cols].sort_values(_cols)
     return df.merge(dups, on=_cols, how='right')
 
