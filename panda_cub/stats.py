@@ -4,6 +4,11 @@
 import pandas as pd
 import scipy.stats as stats
 
+def _listify(obj):
+    if obj is not None and not isinstance(obj, (tuple, list, set)):
+        return [obj]
+    return list(obj)
+
 def t_test(df, x_rank, y_rank, value):
     """Create table of means with t-statistics on the margins."""
     _cols = [x_rank, y_rank, value]
@@ -50,10 +55,8 @@ def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None, verbose
     Set inplace=True to make new column called prefix+'column'+suffix.
     Set inplace=False to return array of winsorized Series conforming to length of `columns`
     """
-    if type(columns) not in (list, iter, set):
-        columns = (columns,)
     new_cols = []
-    for column in columns:
+    for column in _listify(columns):
         new_col_name = '{}{}{}'.format(prefix or '', column, suffix or '')
         p = max(0, min(.5, p))
         low=df[column].quantile(p)
@@ -89,10 +92,8 @@ def normalize(df, columns, p=0, inplace=False, prefix=None, suffix=None, verbose
     Set inplace=True to make new column called prefix+'column'+suffix.
     Set inplace=False to return array of winsorized Series conforming to length of `columns`
     """
-    if type(columns) not in (list, iter, set):
-        columns = (columns,)
     new_cols = []
-    for column in columns:
+    for column in _listify(columns):
         if p > 0 & p < .5:
             low=df[column].quantile(p)
             hi=df[column].quantile(1-p)
@@ -138,8 +139,9 @@ def coalesce(df, *cols, no_scalar=False):
     return _return_column
 
 def get_duplicated(df, columns):
-    dups = df.ix[df.duplicated(columns), columns].sort_values(columns)
-    return df.merge(dups, on=columns, how='right')
+    _cols = _listify(columns)
+    dups = df.ix[df.duplicated(_cols), _cols].sort_values(_cols)
+    return df.merge(dups, on=_cols, how='right')
 
 # Now monkey patch pandas.
 print("Run monkey_patch_pandas() to monkey patch pandas.")
