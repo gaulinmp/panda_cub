@@ -102,3 +102,4 @@ def ciplot(x=None, y=None, hue=None, data=None, conf_level = .95, area_alpha=.5,
 print("Run monkey_patch_seaborn() to monkey patch seaborn.")
 def monkey_patch_seaborn():
     sns.ciplot = ciplot
+    print("Added ciplot to seaborn (sns)")
