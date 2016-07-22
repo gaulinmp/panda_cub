@@ -48,6 +48,11 @@ def get_ffind_df(ind_num):
     """
     Download Fama French industry classification and return DataFrame in the form
 
+    ``sic(int),ff#(int),ff#_name(string),detail(string)``
+
+    For merging into a dataframe by SIC code. Example:
+
+    ``df = df.merge(get_ffind_df(12), on='sic', how='left')``
     """
     if ind_num not in [5, 10, 12, 17, 30, 38, 48, 49]:
         raise ValueError('Industry number must be one of {} not {}.'
