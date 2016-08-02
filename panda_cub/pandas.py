@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
+import logging
 import pandas as pd
 import scipy.stats as stats
+
+__logger = logging.getLogger(__name__)
 
 def _listify(obj):
     if obj is None:
@@ -60,13 +62,19 @@ def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None, verbose
     new_cols = []
     for column in _listify(columns):
         new_col_name = '{}{}{}'.format(prefix or '', column, suffix or '')
+        if column not in df:
+            if inplace:
+                __logger.warning("Column %s not found in df.", column)
+                continue
+            else:
+                __logger.warning("Column %s not found in df.", column)
+                raise KeyError("Column {} not found in data frame".format(column))
         p = max(0, min(.5, p))
         low=df[column].quantile(p)
         hi=df[column].quantile(1-p)
         if pd.np.isnan(low) or pd.np.isnan(hi):
-            if verbose:
-                print("One of the quantiles is NAN! low: {}, high: {}"
-                      .format(low,hi))
+            __logger.warning("One of the quantiles is NAN! low: {}, high: {}"
+                             .format(low, hi))
             continue
         if verbose:
             print("{}: Num < {:0.2f}: {} ({:0.3f}), num > {:0.2f}: {} ({:0.3f})"
