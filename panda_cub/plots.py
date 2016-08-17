@@ -22,6 +22,7 @@ def ciplot(x=None, y=None, hue=None, data=None, conf_level = .95, area_alpha=.5,
     # Sort out default values for the parameters
     if ax is None:
         ax = plt.gca()
+    BACKUP_HUE = '_got_no_hue_but_one_'
     # Handle different types of input data. Just DataFrame for now.
     if isinstance(data, pd.DataFrame):
         xlabel = x
@@ -29,7 +30,8 @@ def ciplot(x=None, y=None, hue=None, data=None, conf_level = .95, area_alpha=.5,
 
         # Condition is optional
         if hue is None:
-            hue = pd.Series(np.ones(len(data)))
+            hue = BACKUP_HUE
+            data[BACKUP_HUE] = pd.Series(np.ones(len(data)))
             legend = False
             legend_name = None
             n_hue = 1
@@ -95,7 +97,8 @@ def ciplot(x=None, y=None, hue=None, data=None, conf_level = .95, area_alpha=.5,
         ax.set_ylabel(ylabel)
     if legend:
         ax.legend(loc=0)
-
+    if hue == BACKUP_HUE:
+        del data[BACKUP_HUE]
     return ax
 
 # Now monkey patch pandas.
