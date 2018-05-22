@@ -3,6 +3,10 @@
 import logging
 import pandas as pd
 import scipy.stats as stats
+try:
+    import statsmodels as sm
+except ImportError:
+    sm = None
 
 __logger = logging.getLogger(__name__)
 
@@ -13,44 +17,91 @@ def _listify(obj):
         return [obj]
     return list(obj)
 
-def t_test(df, x_rank, y_rank, value):
-    """Create table of means with t-statistics on the margins."""
+
+def two_way_t_test(df, x_rank, y_rank, value):
+    """
+    Create table of means by two rank variables, with differences
+    [max(x/y_rank)-min(x/y_rank)] and T-/P-values.
+    If `statsmodel` package is available, use that to calculate
+    diff-in-diff estimator.
+
+    Example: df.two_way_t_test('age_decile', 'size_decile', 'ROA')
+
+    Args:
+        x_rank: Variable for separating groups in X-dimension
+        y_rank: Variable for separating groups in Y-dimension
+        value: Variable to t-test across groups.
+    Returns:
+        Data frame of the results, with:
+        Columns: X-rank unique values, and diff (+ t-stat/p-value) across min/max x-rank groups.
+        Rows: Y-rank unique values, and diff (+ t-stat/p-value) across min/max y-rank groups.
+    Raises:
+        ValueError:
+    """
     _cols = [x_rank, y_rank, value]
-    _df = df.ix[df[_cols].notnull().all(axis=1), _cols]
+    _df = df.loc[df[_cols].notnull().all(axis=1), _cols]
 
     _xs = sorted(_df[x_rank].unique())
     _ys = sorted(_df[y_rank].unique())
 
     _ret = (_df.groupby([x_rank, y_rank])
-              .mean()
-              .reset_index()
-              .pivot(index=y_rank, columns=x_rank, values=value)
-              )
+            .mean()
+            .reset_index()
+            .pivot(index=y_rank, columns=x_rank, values=value)
+            )
     # Check that all intersections of x and y are non-empty
     if _ret.isnull().any().any():
-        _ = _ret.ix[_ret.isnull().any(axis=1),_ret.isnull().any(axis=0)]
+        _ = _ret.loc[_ret.isnull().any(axis=1), _ret.isnull().any(axis=0)]
         raise ValueError("One of the intersections was NaN:\n\n{}"
                          .format(_.fillna('NaN')[_.isnull()].fillna('')))
     # Add difference column
-    _ret.ix[_ys, 'diff'] = _ret.ix[_ys, max(_xs)] - _ret.ix[_ys, min(_xs)]
+    _ret.loc[_ys, 'diff'] = _ret.loc[_ys, max(_xs)] - _ret.loc[_ys, min(_xs)]
     # Add difference row
-    _ret.ix['diff', _xs] = _ret.ix[max(_ys), _xs] - _ret.ix[min(_ys), _xs]
+    _ret.loc['diff', _xs] = _ret.loc[max(_ys), _xs] - _ret.loc[min(_ys), _xs]
 
-    for _x in _xs:
+    for _x in _xs:  # Iterate across X-values
         sel = (_df[x_rank] == _x) & (_df[value].notnull())
-        test = stats.ttest_ind(_df.ix[(_df[y_rank] == max(_ys)) & sel, value],
-                               _df.ix[(_df[y_rank] == min(_ys)) & sel, value])
-        _ret.ix['t-stat', _x] = test.statistic
-        _ret.ix['p-value', _x] = test.pvalue
+        test = stats.ttest_ind(_df.loc[(_df[y_rank] == max(_ys)) & sel, value],
+                               _df.loc[(_df[y_rank] == min(_ys)) & sel, value])
+        _ret.loc['t-stat', _x] = test.statistic
+        _ret.loc['p-value', _x] = test.pvalue
 
-    for _y in _ys:
+    for _y in _ys:  # Iterate across Y-values
         sel = (_df[y_rank] == _y) & (_df[value].notnull())
-        test = stats.ttest_ind(_df.ix[(_df[x_rank] == max(_xs)) & sel, value],
-                               _df.ix[(_df[x_rank] == min(_xs)) & sel, value])
-        _ret.ix[_y, 't-stat'] = test.statistic
-        _ret.ix[_y, 'p-value'] = test.pvalue
+        test = stats.ttest_ind(_df.loc[(_df[x_rank] == max(_xs)) & sel, value],
+                               _df.loc[(_df[x_rank] == min(_xs)) & sel, value])
+        _ret.loc[_y, 't-stat'] = test.statistic
+        _ret.loc[_y, 'p-value'] = test.pvalue
 
-    return _ret
+    # diff in diff estimator
+    if sm is not None:
+        _df[x_rank+'_max'] = (_df[x_rank] == max(_xs))+0
+        _df[x_rank+'_min'] = (_df[x_rank] == min(_xs))+0
+        _df[y_rank+'_max'] = (_df[y_rank] == max(_ys))+0
+        _df[y_rank+'_min'] = (_df[y_rank] == min(_ys))+0
+
+        # Diff-in-diff estimation is the interaction term in
+        # value = intercept + Y_max + X_max + Y_max*X_max
+        dind_name = '_rank_interaction__'
+        _df[dind_name] = _df[x_rank+'_max'] * _df[y_rank+'_max']
+
+        dd_axes = _df.columns[-5:]
+
+        sel = ( (_df[dd_axes[0:2]].sum(axis=1) > 0)
+              & (_df[dd_axes[2:4]].sum(axis=1) > 0)
+              &  _df[value].notnull() )
+
+        # [0::2] grabs maxes and interaction
+        y, x = _df.loc[sel, value], _df.loc[sel, dd_axes[0::2]]
+
+        # cov_type='HC1' uses the robust sandwich estimator
+        fit = sm.OLS(y, sm.add_constant(x)).fit(cov_type='HC1')
+        _ret.loc['diff', 'diff'] = fit.params[dind_name]
+        _ret.loc['t-stat', 't-stat'] = fit.tvalues[dind_name]
+        _ret.loc['p-value', 'p-value'] = fit.pvalues[dind_name]
+
+    return _ret.fillna('')
+
 
 def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None, verbose=False):
     """
@@ -84,12 +135,12 @@ def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None, verbose
                           sum(df[column]>hi )/len(df[column])))
         if inplace:
             df[new_col_name] = df[column].copy()
-            df.ix[df[new_col_name]>hi, new_col_name] = hi
-            df.ix[df[new_col_name]<low, new_col_name] = low
+            df.loc[df[new_col_name]>hi, new_col_name] = hi
+            df.loc[df[new_col_name]<low, new_col_name] = low
         else:
             _tmpcol = df[column].copy()
-            _tmpcol.ix[_tmpcol<low] = low
-            _tmpcol.ix[_tmpcol>hi] = hi
+            _tmpcol.loc[_tmpcol<low] = low
+            _tmpcol.loc[_tmpcol>hi] = hi
             new_cols.append(_tmpcol)
     if inplace:
         return df
@@ -110,8 +161,8 @@ def normalize(df, columns, p=0, inplace=False, prefix=None, suffix=None, verbose
             sel = (df[column]>=low)&(df[column]<=hi)
         else:
             sel = df[column].notnull()
-        _mu = df.ix[sel, column].mean()
-        _rho = df.ix[sel,column].std()
+        _mu = df.loc[sel, column].mean()
+        _rho = df.loc[sel,column].std()
         if not _rho > 0:
             raise ValueError('0 standard deviation found when normalizing '
                              '{} (mean={})'.format(column, _mu))
@@ -155,15 +206,15 @@ def get_duplicated(df, columns):
     occurance of the duplicated rows, this returns both.
     """
     _cols = _listify(columns) if columns else df.columns
-    dups = df.ix[df.duplicated(_cols), _cols].sort_values(_cols)
+    dups = df.loc[df.duplicated(_cols), _cols].sort_values(_cols)
     return df.merge(dups, on=_cols, how='right')
 
 # Now monkey patch pandas.
 print("Run monkey_patch_pandas() to monkey patch pandas.")
 def monkey_patch_pandas():
-    pd.DataFrame.t_test = t_test
+    pd.DataFrame.two_way_t_test = two_way_t_test
     pd.DataFrame.normalize = normalize
     pd.DataFrame.winsor = winsor
     pd.DataFrame.coalesce = coalesce
     pd.DataFrame.get_duplicated = get_duplicated
-    print("Added t_test, normalize, winsor, coalesce, and get_duplicated.")
+    print("Added two_way_t_test, normalize, winsor, coalesce, and get_duplicated.")
