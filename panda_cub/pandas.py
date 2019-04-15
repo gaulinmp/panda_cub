@@ -211,18 +211,35 @@ def get_duplicated(df, columns):
     _cols = _listify(columns) if columns else df.columns
     return df[df.duplicated(_cols, keep=False)].sort_values(_cols)
 
-def value_counts_full(series, normalize=False, cumulative=True, **kwargs):
+def value_counts_full(series, normalize=False, sort=True, cumulative=True, **kwargs):
+    """
+    Series.value_counts() gives a series with the counts OR frequencies (normalize=True),
+    but doesn't show both. Also doesn't show the cumulative frequency.
+    This method provides that in a pretty little table (DataFrame).
+
+    Monkey-patch onto pandas with pd.Series.value_counts_full = value_counts_full to
+    be able to call it like: ``df.column_to_count.value_counts_full()`` just like you
+    would the normal ``Series.value_counts()``.
+
+    """
     _v = series.value_counts(normalize=False, **kwargs)
     _p = series.value_counts(normalize=True, **kwargs)*100
-    _ret = pd.merge(_v, _p, left_index=True, right_index=True, suffixes=('', ' %'))
-    if cumulative:
-        _c = _p.cumsum()
-        _ret = _ret.merge(_c, left_index=True, right_index=True, suffixes=('', ' cum-%'))
+    _ret = pd.merge(_v, _p, left_index=True,
+                    right_index=True, suffixes=('', ' %'))
 
+    # Some cosmetics
+    _ret.columns = ('Count', 'Percent')
     _ret.index.name = series.name
-    _ret.columns = ('Count', 'Percent', 'Cumulative')[:2+cumulative]
-    return _ret
 
+    # sort=False doesn't seem to work as expected with dropna=False,
+    # so just force the index sort.
+    if not sort:
+        _ret.sort_index(inplace=True)
+
+    if cumulative:
+        _ret['Cumulative'] = _ret['Percent'].cumsum()
+
+    return _ret
 
 # Now monkey patch pandas.
 __logger.info("Run monkey_patch_pandas() to monkey patch pandas.")
