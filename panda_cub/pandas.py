@@ -4,7 +4,7 @@ import logging
 import pandas as pd
 import scipy.stats as stats
 try:
-    import statsmodels as sm
+    import statsmodels.api as sm
 except ImportError:
     sm = None
 
@@ -93,17 +93,20 @@ def two_way_t_test(df, x_rank, y_rank, value):
 
         # [0::2] grabs maxes and interaction
         y, x = _df.loc[sel, value], _df.loc[sel, dd_axes[0::2]]
-
-        # cov_type='HC1' uses the robust sandwich estimator
-        fit = sm.OLS(y, sm.add_constant(x)).fit(cov_type='HC1')
-        _ret.loc['diff', 'diff'] = fit.params[dind_name]
-        _ret.loc['t-stat', 't-stat'] = fit.tvalues[dind_name]
-        _ret.loc['p-value', 'p-value'] = fit.pvalues[dind_name]
+        try:
+            # cov_type='HC1' uses the robust sandwich estimator
+            fit = sm.OLS(y, sm.add_constant(x)).fit(cov_type='HC1')
+            _ret.loc['diff', 'diff'] = fit.params[dind_name]
+            _ret.loc['t-stat', 't-stat'] = fit.tvalues[dind_name]
+            _ret.loc['p-value', 'p-value'] = fit.pvalues[dind_name]
+        except:
+            # Must not have had statsmodels
+            pass
 
     return _ret.fillna('')
 
 
-def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None, verbose=False):
+def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None):
     """
     Winsorize columns by setting values outside of the p and 1-p percentiles
     equal to the p and 1-p percentiles respectively.
@@ -127,12 +130,13 @@ def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None, verbose
             __logger.warning("One of the quantiles is NAN! low: {}, high: {}"
                              .format(low, hi))
             continue
-        if verbose:
-            print("{}: Num < {:0.2f}: {} ({:0.3f}), num > {:0.2f}: {} ({:0.3f})"
-                  .format(column, low, sum(df[column]<low),
-                          sum(df[column]<low)/len(df[column]), hi,
-                          sum(df[column]>hi ),
-                          sum(df[column]>hi )/len(df[column])))
+
+        __logger.info("{}: Num < {:0.2f}: {} ({:0.3f}), num > {:0.2f}: {} ({:0.3f})"
+                      .format(column, low, sum(df[column]<low),
+                              sum(df[column]<low)/len(df[column]), hi,
+                              sum(df[column]>hi ),
+                              sum(df[column]>hi )/len(df[column])))
+
         if inplace:
             df[new_col_name] = df[column].copy()
             df.loc[df[new_col_name]>hi, new_col_name] = hi
@@ -146,7 +150,7 @@ def winsor(df, columns, p=0.01, inplace=False, prefix=None, suffix=None, verbose
         return df
     return new_cols
 
-def normalize(df, columns, p=0, inplace=False, prefix=None, suffix=None, verbose=False):
+def normalize(df, columns, p=0, inplace=False, prefix=None, suffix=None):
     """
     Normalize columns to have mean=0 and standard deviation = 1.
     Mean and StdDev. are calculated excluding the <p and >1-p percentiles.
@@ -167,9 +171,9 @@ def normalize(df, columns, p=0, inplace=False, prefix=None, suffix=None, verbose
             raise ValueError('0 standard deviation found when normalizing '
                              '{} (mean={})'.format(column, _mu))
         new_col_name = '{}{}{}'.format(prefix or '', column, suffix or '')
-        if verbose:
-            print('{} = ({} - {:.2f}) / {:.2f}'
-                  .format(new_col_name, column, _mu, _rho))
+
+        __logger.info('{} = ({} - {:.2f}) / {:.2f}'
+                        .format(new_col_name, column, _mu, _rho))
         if inplace:
             df[new_col_name] = (df[column] - _mu) / _rho
         else:
@@ -202,19 +206,32 @@ def coalesce(df, *cols, no_scalar=False):
 def get_duplicated(df, columns):
     """
     Return dataframe of all rows which match duplicated criteria.
-    Differs from df[df.duplicated(cols)] in that the latter returns only the second
-    occurance of the duplicated rows, this returns both.
+    Returns `df[df.duplicated(cols, keep=False)]` and a sort on `cols`.
     """
     _cols = _listify(columns) if columns else df.columns
-    dups = df.loc[df.duplicated(_cols), _cols].sort_values(_cols)
-    return df.merge(dups, on=_cols, how='right')
+    return df[df.duplicated(_cols, keep=False)].sort_values(_cols)
+
+def value_counts_full(series, normalize=False, cumulative=True, **kwargs):
+    _v = series.value_counts(normalize=False, **kwargs)
+    _p = series.value_counts(normalize=True, **kwargs)*100
+    _ret = pd.merge(_v, _p, left_index=True, right_index=True, suffixes=('', ' %'))
+    if cumulative:
+        _c = _p.cumsum()
+        _ret = _ret.merge(_c, left_index=True, right_index=True, suffixes=('', ' cum-%'))
+
+    _ret.index.name = series.name
+    _ret.columns = ('Count', 'Percent', 'Cumulative')[:2+cumulative]
+    return _ret
+
 
 # Now monkey patch pandas.
-print("Run monkey_patch_pandas() to monkey patch pandas.")
+__logger.info("Run monkey_patch_pandas() to monkey patch pandas.")
 def monkey_patch_pandas():
     pd.DataFrame.two_way_t_test = two_way_t_test
     pd.DataFrame.normalize = normalize
     pd.DataFrame.winsor = winsor
     pd.DataFrame.coalesce = coalesce
     pd.DataFrame.get_duplicated = get_duplicated
-    print("Added two_way_t_test, normalize, winsor, coalesce, and get_duplicated.")
+    pd.Series.value_counts_full = value_counts_full
+    __logger.info("Added to DataFrame: two_way_t_test, normalize, winsor, coalesce, and get_duplicated.")
+    __logger.info("Added to Series: value_counts_full.")
